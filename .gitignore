@@ -19,3 +19,7 @@ appsettings.*.local.json
 .env
 *.pem
 google-services.json
+# LibreDWG precompilado (se genera en CI)
+android/app/src/main/cpp/prebuilt/
+android/app/src/main/cpp/.build/
+.cxx/

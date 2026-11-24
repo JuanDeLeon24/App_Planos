@@ -4,6 +4,8 @@ import com.cadfield.core.cad.geom.BBox
 import com.cadfield.core.cad.geom.Vec2
 import com.cadfield.core.cad.geom.Vec3
 import com.cadfield.core.cad.index.QuadTree
+import com.cadfield.core.cad.model.BlockExpander
+import com.cadfield.core.cad.model.CadColor
 import com.cadfield.core.cad.model.CadDocument
 import com.cadfield.core.cad.model.CadEntity
 import kotlin.math.hypot
@@ -25,49 +27,53 @@ class RenderItem(
 )
 
 class RenderModel(val doc: CadDocument) {
-    val origin: Vec2 = doc.extents.center.takeUnless { doc.extents.isEmpty } ?: Vec2.ZERO
+    /** Zona de trabajo (sin entidades atípicas) para el encuadre inicial. */
+    val focus: BBox = doc.focusExtents
+    val origin: Vec2 = focus.center.takeUnless { focus.isEmpty } ?: Vec2.ZERO
     val items: List<RenderItem>
     val index: QuadTree<RenderItem>
     val texts: List<Pair<Int, CadEntity.Text>>
 
     init {
-        val diag = hypot(doc.extents.width, doc.extents.height).takeIf { it > 0 && it.isFinite() } ?: 1.0
+        val diag = hypot(focus.width, focus.height).takeIf { it > 0 && it.isFinite() } ?: 1.0
         val tol = diag / 50_000 // tolerancia de cuerda relativa al tamaño del plano
         val list = ArrayList<RenderItem>(doc.entities.size)
         val txt = ArrayList<Pair<Int, CadEntity.Text>>()
-        doc.entities.forEachIndexed { i, e ->
-            if (e is CadEntity.Text) { txt += i to e; return@forEachIndexed }
-            val layer = doc.layers[e.layer]
-            val color = AciPalette.resolve(e.color.aci, e.color.rgb, layer?.color?.aci ?: 7, layer?.color?.rgb)
-            val polys = expand(e, tol)
-            if (polys.isEmpty()) return@forEachIndexed
+        val expander = BlockExpander(doc)
+
+        fun add(i: Int, layerName: String, c: CadColor, polys: List<List<Vec2>>) {
+            val layer = doc.layers[layerName]
+            val color = AciPalette.resolve(c.aci, c.rgb, layer?.color?.aci ?: 7, layer?.color?.rgb)
             val count = polys.sumOf { maxOf(0, it.size - 1) * 4 }
+            if (count == 0) {
+                // punto aislado: segmento degenerado para que sea visible y seleccionable
+                val p = polys.firstOrNull()?.firstOrNull() ?: return
+                list += RenderItem(i, layerName, color, floatArrayOf(
+                    (p.x - origin.x).toFloat(), (p.y - origin.y).toFloat(), (p.x - origin.x).toFloat(), (p.y - origin.y).toFloat()),
+                    BBox.around(p, 0.0))
+                return
+            }
             val seg = FloatArray(count)
             var k = 0
             for (pl in polys) for (j in 1 until pl.size) {
                 seg[k++] = (pl[j - 1].x - origin.x).toFloat(); seg[k++] = (pl[j - 1].y - origin.y).toFloat()
                 seg[k++] = (pl[j].x - origin.x).toFloat(); seg[k++] = (pl[j].y - origin.y).toFloat()
             }
-            list += RenderItem(i, e.layer, color, seg, BBox.of(polys.flatten()))
+            list += RenderItem(i, layerName, color, seg, BBox.of(polys.flatten()))
+        }
+
+        doc.entities.forEachIndexed { i, e ->
+            when (e) {
+                is CadEntity.Text -> txt += i to e
+                is CadEntity.Insert -> expander.expand(e, tol,
+                    { l, c, pl -> add(i, l, c, listOf(pl)) },
+                    { l, c, t -> txt += i to t.copy(layer = l, color = c) })
+                else -> add(i, e.layer, e.color, e.toPolylines(tol))
+            }
         }
         items = list
         texts = txt
         index = QuadTree.build(list) { it.bounds }
-    }
-
-    /** Expande INSERT de bloques (con escala/rotación) — un nivel de anidamiento por rendimiento. */
-    private fun expand(e: CadEntity, tol: Double): List<List<Vec2>> {
-        if (e !is CadEntity.Insert) return e.toPolylines(tol)
-        val block = doc.blocks[e.blockName] ?: return emptyList()
-        val rad = Math.toRadians(e.rotationDeg)
-        val cos = kotlin.math.cos(rad); val sin = kotlin.math.sin(rad)
-        return block.entities.flatMap { it.toPolylines(tol) }.map { pl ->
-            pl.map { p ->
-                val x = (p.x - block.basePoint.x) * e.scaleX
-                val y = (p.y - block.basePoint.y) * e.scaleY
-                Vec2(e.insert.x + x * cos - y * sin, e.insert.y + x * sin + y * cos)
-            }
-        }
     }
 
     /** Puntos notables con Z (para snapping, cotas y pendientes). */
@@ -76,6 +82,8 @@ class RenderModel(val doc: CadDocument) {
         is CadEntity.Polyline -> e.vertices
         is CadEntity.Circle -> listOf(e.center)
         is CadEntity.Arc -> listOf(e.center)
+        is CadEntity.Ellipse -> listOf(e.center)
+        is CadEntity.Spline -> e.controlPoints.ifEmpty { e.fitPoints }
         is CadEntity.Point -> listOf(e.position)
         is CadEntity.Insert -> listOf(e.insert)
         is CadEntity.Face3D -> e.corners

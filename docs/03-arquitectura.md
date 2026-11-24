@@ -57,7 +57,11 @@ El núcleo es **independiente de Android**: se prueba en cualquier JVM (`./gradl
 | Parser DXF propio | DXF ASCII | Propio | Alta en entidades soportadas | Sí (JVM) | **MVP** — implementado |
 | web-ifc / IfcOpenShell | IFC2x3/IFC4 | MPL-2.0 / LGPL | n/a | WASM/NDK | BIM en F3 |
 
-**Decisión (ADR-001):** MVP con DXF propio (cero costo de licencia, control total, verificable). DWG nativo mediante ODA en Enterprise, encapsulado tras `CadImporter`, ejecutado en proceso aislado (`:cadengine`) para que un fallo nativo no tumbe la app ni la sesión de edición.
+**Decisión (ADR-001, revisada):** DXF con motor propio + **DWG mediante LibreDWG** compilado para Android (arm64-v8a) con un puente JNI (`app/src/main/cpp/dwg_bridge.c`) que convierte DWG→DXF en el teléfono; el DXF derivado se cachea por hash y se lee con el parser en streaming. El original DWG nunca se modifica.
+
+- **Consecuencia de licencia:** LibreDWG es GPLv3, por lo que el proyecto se distribuye bajo **GPLv3** (archivo `LICENSE`). Si en el futuro se requiere una app cerrada o máxima fidelidad DWG, se sustituye el motor por **ODA Drawings SDK** detrás de la misma interfaz, sin cambios en el resto de la app.
+- Validado con los DWG de prueba de LibreDWG (R14, 2000, 2004, 2007, 2010, 2013, 2018) y con un DXF real convertido como prueba de regresión (`RealDrawingTest`).
+- Entidades soportadas en el visor: LINE, LWPOLYLINE/POLYLINE (con arcos), CIRCLE, ARC, ELLIPSE, SPLINE (NURBS), TEXT/MTEXT, ATTRIB, POINT, 3DFACE, SOLID/TRACE, INSERT (bloques anidados, BYBLOCK, capa 0) y DIMENSION (vía su bloque). Pendiente: HATCH (relleno), MLINE, MULTILEADER, XREF.
 
 ## 5. Render
 

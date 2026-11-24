@@ -33,6 +33,6 @@ cd backend && docker compose up --build       # API: requiere .env con POSTGRES_
 
 ## Decisiones clave
 
-- **DWG**: el MVP lee DXF con motor propio; el DWG nativo se integra con **ODA Drawings SDK** (licencia comercial) mediante la interfaz `CadImporter`. LibreDWG se descarta en la app por ser GPL. Ver [docs/03-arquitectura.md](docs/03-arquitectura.md).
+- **DWG**: se abre con **LibreDWG** (compilado para Android, convierte DWG→DXF en el teléfono). Por ello el proyecto es **GPLv3** (ver `LICENSE`). Para fidelidad máxima o app cerrada, el motor puede sustituirse por ODA Drawings SDK. Ver [docs/03-arquitectura.md](docs/03-arquitectura.md).
 - **Precisión**: geometría en float relativa a un origen local y traslación en doble precisión (coordenadas UTM sin pérdida).
 - **IA**: el asistente sólo orquesta funciones deterministas (`DrawingAnalyzer`); nunca inventa cifras.

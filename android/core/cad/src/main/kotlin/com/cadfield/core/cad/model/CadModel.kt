@@ -114,9 +114,70 @@ sealed class CadEntity {
         val blockName: String, val insert: Vec3,
         val scaleX: Double = 1.0, val scaleY: Double = 1.0, val rotationDeg: Double = 0.0,
         val attributes: Map<String, String> = emptyMap(),
+        /** Textos de atributos visibles (ATTRIB), ya en coordenadas de mundo. */
+        val attribTexts: List<Text> = emptyList(),
     ) : CadEntity() {
         override fun bounds() = BBox.around(insert.xy(), 0.0)
         override fun toPolylines(chordTol: Double) = emptyList<List<Vec2>>()
+    }
+
+    /** Elipse o arco elíptico (parámetros en radianes). */
+    data class Ellipse(
+        override val handle: String, override val layer: String, override val color: CadColor,
+        val center: Vec3, val majorAxis: Vec3, val ratio: Double, val startParam: Double, val endParam: Double,
+    ) : CadEntity() {
+        override fun bounds() = BBox.of(toPolylines(majorAxis.length() * 1e-3).flatten())
+        override fun toPolylines(chordTol: Double): List<List<Vec2>> {
+            val a = majorAxis.xy()
+            val b = Vec2(-a.y, a.x) * ratio
+            var sweep = endParam - startParam
+            while (sweep <= 0) sweep += 2 * Math.PI
+            val n = Tessellation.segmentsFor(a.length(), sweep, chordTol).coerceAtLeast(8)
+            val c = center.xy()
+            return listOf((0..n).map { i ->
+                val t = startParam + sweep * i / n
+                c + a * kotlin.math.cos(t) + b * kotlin.math.sin(t)
+            })
+        }
+    }
+
+    /** B-spline / NURBS (evaluación de De Boor). Sin nudos → polilínea por puntos de ajuste. */
+    data class Spline(
+        override val handle: String, override val layer: String, override val color: CadColor,
+        val degree: Int, val knots: List<Double>, val controlPoints: List<Vec3>,
+        val weights: List<Double> = emptyList(), val fitPoints: List<Vec3> = emptyList(),
+    ) : CadEntity() {
+        override fun bounds() = BBox.of(toPolylines(0.0).flatten())
+        override fun toPolylines(chordTol: Double): List<List<Vec2>> {
+            val n = controlPoints.size
+            val p = degree
+            if (n < 2 || p < 1 || knots.size != n + p + 1) {
+                val pts = (fitPoints.ifEmpty { controlPoints }).map { it.xy() }
+                return if (pts.size >= 2) listOf(pts) else emptyList()
+            }
+            val t0 = knots[p]; val t1 = knots[n]
+            if (t1 <= t0) return listOf(controlPoints.map { it.xy() })
+            val samples = (n * 8).coerceIn(16, 2048)
+            return listOf((0..samples).map { i -> evaluate(t0 + (t1 - t0) * i / samples) })
+        }
+
+        fun evaluate(t: Double): Vec2 {
+            val p = degree; val n = controlPoints.size
+            var k = p
+            while (k < n - 1 && t >= knots[k + 1]) k++
+            val w = DoubleArray(p + 1) { weights.getOrElse(k - p + it) { 1.0 } }
+            val x = DoubleArray(p + 1) { controlPoints[k - p + it].x * w[it] }
+            val y = DoubleArray(p + 1) { controlPoints[k - p + it].y * w[it] }
+            for (r in 1..p) for (j in p downTo r) {
+                val i = j + k - p
+                val den = knots[i + p - r + 1] - knots[i]
+                val a = if (den == 0.0) 0.0 else (t - knots[i]) / den
+                x[j] = (1 - a) * x[j - 1] + a * x[j]
+                y[j] = (1 - a) * y[j - 1] + a * y[j]
+                w[j] = (1 - a) * w[j - 1] + a * w[j]
+            }
+            return Vec2(x[p] / w[p], y[p] / w[p])
+        }
     }
 
     /** Entidad no interpretada: se preserva (nunca se pierde información del original). */
@@ -148,9 +209,36 @@ class CadDocument(
     val acadVersion: String? = null,
     headerExtents: BBox? = null,
 ) {
+    /**
+     * Extensión real calculada desde la geometría (incluye bloques insertados).
+     * El encabezado ($EXTMIN/$EXTMAX) suele estar desactualizado en DWG reales, así
+     * que sólo se usa si el dibujo no tiene geometría medible.
+     */
     val extents: BBox by lazy {
-        headerExtents?.takeUnless { it.isEmpty || it.width > 1e12 }
-            ?: entities.fold(BBox.EMPTY) { acc, e -> acc.union(e.bounds()) }
+        val expander = BlockExpander(this)
+        var b = BBox.EMPTY
+        for (e in entities) b = b.union(if (e is CadEntity.Insert) expander.bounds(e) else e.bounds())
+        if (!b.isEmpty) b else headerExtents?.takeUnless { it.isEmpty || it.width > 1e12 } ?: BBox.EMPTY
+    }
+
+    /**
+     * Zona de trabajo para el encuadre inicial: descarta entidades atípicas (objetos
+     * perdidos lejos del dibujo, bloques gigantes) usando percentiles 1–99 % de los
+     * centros. Así "ajustar a pantalla" muestra el plano y no un punto diminuto.
+     */
+    val focusExtents: BBox by lazy {
+        val expander = BlockExpander(this)
+        val boxes = entities.map { if (it is CadEntity.Insert) expander.bounds(it) else it.bounds() }.filter { !it.isEmpty }
+        if (boxes.size < 20) return@lazy extents
+        val xs = boxes.map { it.center.x }.sorted(); val ys = boxes.map { it.center.y }.sorted()
+        fun pct(v: List<Double>, q: Double) = v[((v.size - 1) * q).toInt()]
+        val core = BBox(pct(xs, 0.01), pct(ys, 0.01), pct(xs, 0.99), pct(ys, 0.99))
+        val margin = maxOf(core.width, core.height) * 0.05
+        val zone = core.expand(maxOf(margin, 1e-9))
+        val typical = boxes.map { maxOf(it.width, it.height) }.sorted().let { pct(it, 0.99) }
+        var b = BBox.EMPTY
+        for (bx in boxes) if (zone.contains(bx.center) && maxOf(bx.width, bx.height) <= maxOf(typical, zone.width + zone.height)) b = b.union(bx)
+        if (b.isEmpty) extents else b
     }
 
     val entityCountByType: Map<String, Int> by lazy {

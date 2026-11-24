@@ -44,7 +44,7 @@ class DxfParserTest {
         0 to "SEQEND",
         0 to "INSERT", 8 to "INSPECCION", 2 to "PI", 10 to 6, 20 to 6,
         0 to "MTEXT", 8 to "TXT", 10 to 1, 20 to 1, 40 to 0.25, 1 to "Línea 1\\PLínea 2",
-        0 to "SPLINE", 8 to "0",
+        0 to "HATCH", 8 to "0",
         0 to "ENDSEC",
         0 to "EOF",
     )

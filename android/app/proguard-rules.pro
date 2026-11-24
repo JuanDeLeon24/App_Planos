@@ -6,3 +6,6 @@
 -keepclassmembers class com.cadfield.** { *** Companion; kotlinx.serialization.KSerializer serializer(...); }
 # Room
 -keep class * extends androidx.room.RoomDatabase
+
+# JNI LibreDWG
+-keep class com.cadfield.viewer.cad.LibreDwg { native <methods>; }

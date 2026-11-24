@@ -189,14 +189,19 @@ class DxfParser(
             val g = next() ?: return out
             if (g.code != 0) continue
             if (g.value == endMarker) return out
-            val e = parseEntity(g.value) ?: continue
+            val e = parseEntity(g.value, skipPaperSpace = applyLayerFilter) ?: continue
             if (applyLayerFilter && layerFilter != null && !layerFilter.invoke(e.layer)) continue
             out += e
         }
     }
 
-    private fun parseEntity(type: String): CadEntity? {
+    private fun parseEntity(type: String, skipPaperSpace: Boolean = false): CadEntity? {
         val body = readBody()
+        // Entidades de espacio papel (código 67 = 1: viewports, cajetines de layout) no se dibujan en el modelo
+        if (skipPaperSpace && body.any { it.code == 67 && it.i() == 1 }) {
+            if (type == "POLYLINE" || type == "INSERT") skipSequence(body)
+            return null
+        }
         val handle = body.firstOrNull { it.code == 5 }?.value?.trim() ?: "AUTO${autoHandle++}"
         val layer = body.firstOrNull { it.code == 8 }?.value?.trim() ?: "0"
         val color = CadColor(
@@ -213,6 +218,16 @@ class DxfParser(
             "MTEXT" -> CadEntity.Text(handle, layer, color, vec(body, 10), dbl(body, 40),
                 cleanMText(body.filter { it.code == 3 }.joinToString("") { it.value } + str(body, 1)), dbl(body, 50))
             "3DFACE" -> CadEntity.Face3D(handle, layer, color, listOf(vec(body, 10), vec(body, 11), vec(body, 12), vec(body, 13)))
+            // SOLID/TRACE: el orden de vértices DXF es 1-2-4-3
+            "SOLID", "TRACE" -> CadEntity.Face3D(handle, layer, color, listOf(vec(body, 10), vec(body, 11), vec(body, 13), vec(body, 12)))
+            "ELLIPSE" -> CadEntity.Ellipse(handle, layer, color, vec(body, 10), vec(body, 11),
+                body.firstOrNull { it.code == 40 }?.d() ?: 1.0, dbl(body, 41),
+                body.firstOrNull { it.code == 42 }?.d() ?: (2 * Math.PI))
+            "SPLINE" -> parseSpline(handle, layer, color, body)
+            // La geometría de una cota vive en su bloque anónimo (*Dnn), ya en coordenadas de mundo
+            "DIMENSION" -> str(body, 2).takeIf { it.isNotBlank() }
+                ?.let { CadEntity.Insert(handle, layer, color, it.trim(), com.cadfield.core.cad.geom.Vec3(0.0, 0.0, 0.0)) }
+                ?: CadEntity.Unknown(handle, layer, color, type)
             "LWPOLYLINE" -> parseLwPolyline(handle, layer, color, body)
             "POLYLINE" -> parseOldPolyline(handle, layer, color, body)
             "INSERT" -> parseInsert(handle, layer, color, body)
@@ -254,8 +269,39 @@ class DxfParser(
         return CadEntity.Polyline(h, l, c, verts, bulges, closed = flags and 1 != 0)
     }
 
+    private fun parseSpline(h: String, l: String, c: CadColor, body: List<Group>): CadEntity {
+        val knots = body.filter { it.code == 40 }.map { it.d() }
+        val weights = body.filter { it.code == 41 }.map { it.d() }
+        fun pts(cx: Int): List<com.cadfield.core.cad.geom.Vec3> {
+            val out = ArrayList<com.cadfield.core.cad.geom.Vec3>()
+            var x = 0.0; var y = 0.0; var has = false
+            for (g in body) when (g.code) {
+                cx -> { if (has) out += com.cadfield.core.cad.geom.Vec3(x, y, 0.0); x = g.d(); y = 0.0; has = true }
+                cx + 10 -> y = g.d()
+                cx + 20 -> { out += com.cadfield.core.cad.geom.Vec3(x, y, g.d()); has = false }
+            }
+            if (has) out += com.cadfield.core.cad.geom.Vec3(x, y, 0.0)
+            return out
+        }
+        return CadEntity.Spline(h, l, c, body.firstOrNull { it.code == 71 }?.i() ?: 3, knots, pts(10), weights, pts(11))
+    }
+
+    /** Consume VERTEX/ATTRIB ... SEQEND de una entidad descartada. */
+    private fun skipSequence(body: List<Group>) {
+        val hasSeq = when {
+            body.any { it.code == 66 && it.i() == 1 } -> true
+            else -> false
+        }
+        if (!hasSeq && peek()?.value != "VERTEX") return
+        while (true) {
+            val g = next() ?: return
+            if (g.code == 0 && g.value == "SEQEND") { readBody(); return }
+        }
+    }
+
     private fun parseInsert(h: String, l: String, c: CadColor, body: List<Group>): CadEntity {
         val attrs = LinkedHashMap<String, String>()
+        val texts = ArrayList<CadEntity.Text>()
         val hasAttribs = (body.firstOrNull { it.code == 66 }?.i() ?: 0) == 1
         if (hasAttribs) {
             while (true) {
@@ -263,14 +309,23 @@ class DxfParser(
                 if (g.code != 0) continue
                 if (g.value == "SEQEND") { readBody(); break }
                 val ab = readBody()
-                if (g.value == "ATTRIB") attrs[str(ab, 2)] = str(ab, 1)
+                if (g.value == "ATTRIB") {
+                    attrs[str(ab, 2)] = str(ab, 1)
+                    val invisible = (ab.firstOrNull { it.code == 70 }?.i() ?: 0) and 1 != 0
+                    if (!invisible && str(ab, 1).isNotBlank()) texts += CadEntity.Text(
+                        ab.firstOrNull { it.code == 5 }?.value?.trim() ?: "AUTO${autoHandle++}",
+                        ab.firstOrNull { it.code == 8 }?.value?.trim() ?: l,
+                        CadColor(ab.firstOrNull { it.code == 62 }?.i() ?: CadColor.BY_LAYER, ab.firstOrNull { it.code == 420 }?.i()),
+                        vec(ab, 10), dbl(ab, 40), str(ab, 1), dbl(ab, 50),
+                    )
+                }
             }
         }
         return CadEntity.Insert(
             h, l, c, blockName = str(body, 2), insert = vec(body, 10),
             scaleX = body.firstOrNull { it.code == 41 }?.d() ?: 1.0,
             scaleY = body.firstOrNull { it.code == 42 }?.d() ?: 1.0,
-            rotationDeg = dbl(body, 50), attributes = attrs,
+            rotationDeg = dbl(body, 50), attributes = attrs, attribTexts = texts,
         )
     }
 

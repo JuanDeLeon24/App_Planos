@@ -117,19 +117,20 @@ fun ViewerScreen(docId: String, onBack: () -> Unit, onHistory: () -> Unit, vm: V
         BoxWithConstraints(Modifier.padding(pad).fillMaxSize().background(Color(0xFF0B1620))) {
             val w = constraints.maxWidth.toDouble(); val h = constraints.maxHeight.toDouble()
             val render = st.render
-            LaunchedEffect(render, w, h) { if (render != null && view == null) view = Affine2D.fit(render.doc.extents, w, h) }
+            LaunchedEffect(render, w, h) { if (render != null && view == null) view = Affine2D.fit(render.focus, w, h) }
             when {
                 st.error != null -> ErrorPanel(st.error!!)
                 st.loadingProgress != null -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    LinearProgressIndicator(progress = { st.loadingProgress ?: 0f }, modifier = Modifier.fillMaxWidth())
+                    if (st.loadingStage != null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(progress = { st.loadingProgress ?: 0f }, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(8.dp))
-                    Text("Cargando plano… ${((st.loadingProgress ?: 0f) * 100).toInt()} %", color = Color.White)
+                    Text(st.loadingStage ?: "Cargando plano… ${((st.loadingProgress ?: 0f) * 100).toInt()} %", color = Color.White)
                 }
                 view != null -> CadCanvas(st, view!!, { view = it }, rotation, vm::onTap, Modifier.fillMaxSize())
             }
             // Botón "ajustar a extensión"
             if (render != null) SmallFloatingActionButton(
-                onClick = { view = Affine2D.fit(render.doc.extents, w, h) },
+                onClick = { view = Affine2D.fit(render.focus, w, h) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
             ) { Icon(Icons.Default.FitScreen, "Ajustar") }
 

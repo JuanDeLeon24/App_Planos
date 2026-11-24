@@ -35,7 +35,7 @@ object Exporters {
     private const val A3_H = 842  // pt (297 mm)
 
     fun pdf(ctx: Context, doc: CadDocument, hiddenLayers: Set<String>, annotations: Collection<AnnotationRecord>,
-            info: ReportInfo, view: BBox = doc.extents): File {
+            info: ReportInfo, view: BBox = doc.focusExtents): File {
         val pdf = PdfDocument()
         val page = pdf.startPage(PdfDocument.PageInfo.Builder(A3_W, A3_H, 1).create())
         val c = page.canvas
@@ -46,16 +46,24 @@ object Exporters {
 
         c.save()
         c.clipRect(drawArea.minX.toFloat(), drawArea.minY.toFloat(), drawArea.maxX.toFloat(), drawArea.maxY.toFloat())
+        val expander = com.cadfield.core.cad.model.BlockExpander(doc)
+        fun stroke(layer: String, color: com.cadfield.core.cad.model.CadColor, pl: List<com.cadfield.core.cad.geom.Vec2>) {
+            if (layer in hiddenLayers || pl.isEmpty()) return
+            val aci = if (color.aci == 256 || color.aci == 0) doc.layers[layer]?.color?.aci ?: 7 else color.aci
+            paint.color = if (aci == 7) Color.BLACK else AciPalette.argb(aci) // fondo blanco en papel
+            val path = Path()
+            pl.forEachIndexed { i, p -> val s = t.apply(p); if (i == 0) path.moveTo(s.x.toFloat(), s.y.toFloat()) else path.lineTo(s.x.toFloat(), s.y.toFloat()) }
+            c.drawPath(path, paint)
+        }
         for (e in doc.entities) {
+            if (e is CadEntity.Insert) {
+                if (expander.bounds(e).intersects(view)) expander.expand(e, tol, { l, col, pl -> stroke(l, col, pl) })
+                continue
+            }
             if (e.layer in hiddenLayers || !e.bounds().intersects(view)) continue
             val aci = if (e.color.aci == 256) doc.layers[e.layer]?.color?.aci ?: 7 else e.color.aci
-            paint.color = if (aci == 7) Color.BLACK else AciPalette.argb(aci) // fondo blanco en papel
-            for (pl in e.toPolylines(tol)) {
-                if (pl.isEmpty()) continue
-                val path = Path()
-                pl.forEachIndexed { i, p -> val s = t.apply(p); if (i == 0) path.moveTo(s.x.toFloat(), s.y.toFloat()) else path.lineTo(s.x.toFloat(), s.y.toFloat()) }
-                c.drawPath(path, paint)
-            }
+            paint.color = if (aci == 7) Color.BLACK else AciPalette.argb(aci)
+            for (pl in e.toPolylines(tol)) stroke(e.layer, e.color, pl)
             if (e is CadEntity.Text) {
                 val s = t.apply(e.insert.xy())
                 val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = paint.color; textSize = (e.height * t.scale).toFloat().coerceAtLeast(2f) }

@@ -18,6 +18,15 @@ android {
         versionName = "0.1.0-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"https://api.cadfield.example/\"")
+        // Motor DWG nativo (LibreDWG): sólo ARM 64 bits (prácticamente todos los teléfonos desde 2017)
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {

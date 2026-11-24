@@ -45,6 +45,8 @@ data class MeasureUi(val tool: Tool, val points: List<Vec3>, val text: String)
 data class ViewerState(
     val doc: DocumentEntity? = null,
     val loadingProgress: Float? = 0f,
+    /** Etapa sin progreso medible (p.ej. conversión DWG nativa). */
+    val loadingStage: String? = null,
     val error: String? = null,
     val render: RenderModel? = null,
     val layers: List<LayerUi> = emptyList(),
@@ -76,13 +78,15 @@ class ViewerViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(doc = doc, loadingProgress = 0f) }
                 val s = withContext(Dispatchers.IO) { c.documents.openSession(docId) }
                 session = s
-                val model = c.documents.loadModel(doc) { p -> _state.update { it.copy(loadingProgress = p.toFloat()) } }
+                val model = c.documents.loadModel(doc,
+                    onStage = { stage -> _state.update { it.copy(loadingStage = stage) } },
+                ) { p -> _state.update { it.copy(loadingProgress = p.toFloat(), loadingStage = null) } }
                 val render = withContext(Dispatchers.Default) { RenderModel(model) }
                 val counts = model.entities.groupingBy { it.layer }.eachCount()
                 val hiddenLayers = s.snapshot.metadata["hidden.layers"]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet().orEmpty()
                 _state.update {
                     it.copy(
-                        render = render, loadingProgress = null,
+                        render = render, loadingProgress = null, loadingStage = null,
                         layers = model.layers.values.map { l -> LayerUi(l, l.visible && !l.frozen && l.name !in hiddenLayers, 1f, counts[l.name] ?: 0) }
                             .sortedBy { l -> l.layer.name },
                         hiddenHandles = s.snapshot.metadata["hidden.handles"]?.split(',')?.filter { h -> h.isNotEmpty() }?.toSet().orEmpty(),
@@ -104,7 +108,7 @@ class ViewerViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message ?: e.toString(), loadingProgress = null) }
+                _state.update { it.copy(error = e.message ?: e.toString(), loadingProgress = null, loadingStage = null) }
             }
         }
     }

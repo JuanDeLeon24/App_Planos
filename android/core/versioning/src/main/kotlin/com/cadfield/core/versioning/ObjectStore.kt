@@ -74,6 +74,9 @@ class FileObjectStore(private val root: File) : ObjectStore {
     override fun open(hash: String): InputStream = pathOf(hash).inputStream()
     override fun exists(hash: String) = pathOf(hash).exists()
     override fun size(hash: String) = pathOf(hash).length()
+
+    /** Ruta del objeto en disco (sólo lectura) para motores nativos que requieren un archivo. */
+    fun fileOf(hash: String): File = pathOf(hash)
     override fun verify(hash: String) = exists(hash) && runCatching { get(hash) }.isSuccess
 
     /** Lista todos los objetos (para auditoría/backup/fsck). */

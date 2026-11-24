@@ -23,6 +23,7 @@ import com.cadfield.viewer.data.db.SyncQueueEntity
 import com.cadfield.viewer.data.db.SyncState
 import com.cadfield.viewer.data.db.TagEntity
 import com.cadfield.viewer.data.db.VersionEntity
+import com.cadfield.viewer.cad.LibreDwg
 import com.cadfield.viewer.security.CryptoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -121,7 +122,7 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
     }
 
     /** Carga el modelo CAD desde el original inmutable, en streaming y con progreso. */
-    suspend fun loadModel(doc: DocumentEntity, onProgress: (Double) -> Unit): CadDocument = withContext(Dispatchers.IO) {
+    suspend fun loadModel(doc: DocumentEntity, onStage: (String) -> Unit = {}, onProgress: (Double) -> Unit): CadDocument = withContext(Dispatchers.IO) {
         val format = CadFormat.valueOf(doc.format)
         val repo = repo(doc.id)
         when (format) {
@@ -129,6 +130,19 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
                 // DXF ≤ R2004 usa ANSI_1252; R2007+ es UTF-8. Se prueba UTF-8 (compatible con ASCII).
                 DxfParser(totalChars = doc.sizeBytes, onProgress = onProgress)
                     .parse(InputStreamReader(stream, Charsets.UTF_8))
+            }
+            CadFormat.DWG -> {
+                // DXF derivado: regenerable, cacheado por hash del original (no forma parte del historial)
+                val derived = File(File(File(docsRoot, doc.id), "derived").apply { mkdirs() }, "${doc.originalHash}.dxf")
+                if (!derived.exists()) {
+                    if (!LibreDwg.available) throw UnsupportedFormatException(format, hintFor(format))
+                    onStage("Convirtiendo DWG (${"%.1f".format(doc.sizeBytes / 1_048_576.0)} MB)… puede tardar en planos grandes")
+                    LibreDwg.convert(repo.objects.fileOf(doc.originalHash), derived)
+                }
+                derived.inputStream().buffered(1 shl 16).use { stream ->
+                    DxfParser(totalChars = derived.length(), onProgress = onProgress)
+                        .parse(InputStreamReader(stream, Charsets.UTF_8))
+                }
             }
             else -> {
                 val importer = importers.firstOrNull { format in it.supported }
@@ -139,7 +153,7 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
     }
 
     private fun hintFor(f: CadFormat) = when (f) {
-        CadFormat.DWG -> "requiere el motor DWG (ODA Drawings SDK) — disponible en la edición Enterprise. " +
+        CadFormat.DWG -> "el motor DWG (LibreDWG) no está disponible en este dispositivo. " +
             "Alternativa: exporte a DXF desde AutoCAD/BricsCAD/LibreCAD."
         CadFormat.DXF_BINARY -> "guarde el DXF en formato ASCII."
         CadFormat.IFC -> "requiere el módulo BIM (IfcOpenShell/web-ifc), fase 3 del roadmap."

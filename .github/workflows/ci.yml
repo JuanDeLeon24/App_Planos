@@ -29,8 +29,23 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Caché de LibreDWG para Android
+        id: ldwg
+        uses: actions/cache@v4
+        with:
+          path: android/app/src/main/cpp/prebuilt
+          key: libredwg-android-${{ hashFiles('android/app/src/main/cpp/build-libredwg.sh') }}
+      - name: Compilar LibreDWG (arm64-v8a)
+        if: steps.ldwg.outputs.cache-hit != 'true'
+        run: android/app/src/main/cpp/build-libredwg.sh arm64-v8a
       - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --console=plain
         working-directory: android
+      - name: Verificar que el motor DWG está dentro del APK
+        run: |
+          unzip -l android/app/build/outputs/apk/debug/*.apk | tee /tmp/apk.txt | grep libcadfield_dwg.so
+          size=$(grep libcadfield_dwg.so /tmp/apk.txt | awk '{print $1}')
+          echo "libcadfield_dwg.so = $size bytes"
+          test "$size" -gt 1000000 || { echo "El APK contiene el stub, no LibreDWG"; exit 1; }
       - uses: actions/upload-artifact@v4
         with: { name: app-debug-apk, path: android/app/build/outputs/apk/debug/*.apk }
 
