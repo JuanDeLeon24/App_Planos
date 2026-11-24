@@ -23,6 +23,7 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -37,6 +38,12 @@
                 <data android:mimeType="image/vnd.dxf" />
                 <data android:mimeType="application/acad" />
                 <data android:mimeType="image/vnd.dwg" />
+                <data android:mimeType="application/x-dwg" />
+                <data android:mimeType="image/x-dwg" />
+                <data android:mimeType="application/x-autocad" />
+                <data android:mimeType="application/x-dxf" />
+                <data android:mimeType="image/x-dxf" />
+                <data android:mimeType="application/pdf" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>

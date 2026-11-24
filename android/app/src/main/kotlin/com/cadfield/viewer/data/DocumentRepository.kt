@@ -77,7 +77,16 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
         val tmpDir = File(docsRoot, "tmp").apply { mkdirs() }
         val tmp = File.createTempFile("import", ".bin", tmpDir)
         try {
-            resolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it, 1 shl 16) } }
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            (resolver.openInputStream(uri) ?: error("No se pudo leer el archivo recibido")).use { input ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n); out.write(buf, 0, n) }
+                }
+            }
+            val hash = md.digest().joinToString("") { "%02x".format(it) }
+            // El mismo archivo recibido dos veces (p.ej. reenviado por WhatsApp) no se duplica
+            db.documents().findByHash(hash)?.let { return@withContext it }
             val head = tmp.inputStream().use { s -> ByteArray(64).also { s.read(it) } }
             val format = FormatDetector.detect(head, name)
             val id = UUID.randomUUID().toString()
@@ -100,6 +109,15 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
         } finally {
             tmp.delete()
         }
+    }
+
+    /**
+     * Archivo recibido desde otra app ("Abrir con" en WhatsApp, correo, gestor de archivos).
+     * Se importa en el proyecto "Recibidos" (creado si no existe) y devuelve el documento.
+     */
+    suspend fun importExternal(uri: Uri, user: String): DocumentEntity {
+        val project = db.projects().findByName(INBOX_PROJECT) ?: createProject(INBOX_PROJECT, user)
+        return import(uri, ImportMetadata(project.id), user)
     }
 
     /** Carga el modelo CAD desde el original inmutable, en streaming y con progreso. */
@@ -205,4 +223,6 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
     /** Outbox: los objetos faltantes en el servidor se calculan en el SyncWorker (sync diferencial). */
     private suspend fun enqueueCommitUpload(docId: String, c: Commit) =
         db.syncQueue().enqueue(SyncQueueEntity(documentId = docId, kind = "COMMIT", ref = c.id, createdAt = System.currentTimeMillis()))
+
+    companion object { const val INBOX_PROJECT = "Recibidos" }
 }

@@ -17,6 +17,9 @@ interface ProjectDao {
 
     @Query("SELECT * FROM projects WHERE id = :id")
     suspend fun get(id: String): ProjectEntity?
+
+    @Query("SELECT * FROM projects WHERE name = :name LIMIT 1")
+    suspend fun findByName(name: String): ProjectEntity?
 }
 
 @Dao
@@ -33,6 +36,9 @@ interface DocumentDao {
 
     @Query("SELECT * FROM documents WHERE id = :id")
     suspend fun get(id: String): DocumentEntity?
+
+    @Query("SELECT * FROM documents WHERE originalHash = :hash LIMIT 1")
+    suspend fun findByHash(hash: String): DocumentEntity?
 
     @Query("SELECT * FROM documents WHERE id IN (:ids)")
     suspend fun getAll(ids: List<String>): List<DocumentEntity>
