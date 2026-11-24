@@ -12,10 +12,7 @@ TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 WORK="${WORK:-$HERE/.build}"
 mkdir -p "$WORK"
 cd "$WORK"
-if [ ! -d "libredwg-$VERSION" ]; then
-  curl -sSfL -o src.tar.xz "https://github.com/LibreDWG/libredwg/releases/download/$VERSION/libredwg-$VERSION.tar.xz"
-  tar xf src.tar.xz
-fi
+[ -f src.tar.xz ] || curl -sSfL -o src.tar.xz "https://github.com/LibreDWG/libredwg/releases/download/$VERSION/libredwg-$VERSION.tar.xz"
 for ABI in "${ABIS[@]}"; do
   case "$ABI" in
     arm64-v8a)   HOST=aarch64-linux-android;   CCP=aarch64-linux-android$API ;;
@@ -24,13 +21,15 @@ for ABI in "${ABIS[@]}"; do
     *) echo "ABI no soportada: $ABI"; exit 1 ;;
   esac
   OUT="$HERE/prebuilt/$ABI"
-  rm -rf "build-$ABI" && cp -r "libredwg-$VERSION" "build-$ABI"
+  # Extracción limpia por ABI: conserva las fechas de los archivos generados (configure,
+  # Makefile.in) para que make no intente regenerarlos con autotools.
+  rm -rf "build-$ABI" "libredwg-$VERSION" && tar xf src.tar.xz && mv "libredwg-$VERSION" "build-$ABI"
   ( cd "build-$ABI"
     ./configure --host="$HOST" \
       CC="$TC/bin/$CCP-clang" AR="$TC/bin/llvm-ar" RANLIB="$TC/bin/llvm-ranlib" STRIP="$TC/bin/llvm-strip" \
       CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections -DNDEBUG" \
       --disable-shared --enable-static --disable-bindings --disable-python --disable-json \
-      --disable-werror --enable-release > configure.log 2>&1 || { tail -50 configure.log; exit 1; }
+      --disable-werror --enable-release --disable-dependency-tracking > configure.log 2>&1 || { tail -50 configure.log; exit 1; }
     make -C src -j"$(nproc)" > make.log 2>&1 || { tail -80 make.log; exit 1; }
   )
   rm -rf "$OUT" && mkdir -p "$OUT/lib" "$OUT/include"

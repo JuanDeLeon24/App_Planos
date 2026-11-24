@@ -87,7 +87,13 @@ class DocumentRepository(private val context: Context, private val db: AppDataba
             }
             val hash = md.digest().joinToString("") { "%02x".format(it) }
             // El mismo archivo recibido dos veces (p.ej. reenviado por WhatsApp) no se duplica
-            db.documents().findByHash(hash)?.let { return@withContext it }
+            db.documents().findByHash(hash)?.let { existing ->
+                // ya estaba en la lista: se sube al principio como "reciente"
+                val touched = existing.copy(updatedAt = System.currentTimeMillis())
+                db.documents().update(touched)
+                audit(user, "OPEN_EXISTING", existing.id, name)
+                return@withContext touched
+            }
             val head = tmp.inputStream().use { s -> ByteArray(64).also { s.read(it) } }
             val format = FormatDetector.detect(head, name)
             val id = UUID.randomUUID().toString()

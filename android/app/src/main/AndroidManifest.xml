@@ -46,6 +46,22 @@
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
+            <!-- Gestores de archivos que no informan tipo MIME: por extensión -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\\.dwg" />
+                <data android:pathPattern=".*\\.DWG" />
+                <data android:pathPattern=".*\\.dxf" />
+                <data android:pathPattern=".*\\.DXF" />
+                <data android:pathPattern=".*\\..*\\.dwg" />
+                <data android:pathPattern=".*\\..*\\.dxf" />
+            </intent-filter>
         </activity>
 
         <provider
