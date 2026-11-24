@@ -100,6 +100,22 @@ class VersionRepository(private val dir: File, private val clock: () -> Long = S
         return null
     }
 
+    /**
+     * Actualiza una referencia a un commit ya presente en el almacén (p.ej. tras descargar
+     * la rama remota "remoto.principal" durante la sincronización).
+     */
+    fun updateRef(branch: String, commitId: String) {
+        require(branch.matches(Regex("[A-Za-z0-9._-]{1,64}"))) { "Nombre de rama inválido" }
+        require(objects.verify(commitId)) { "Commit inexistente o corrupto: $commitId" }
+        writeRef(branch, commitId)
+    }
+
+    /** Objetos necesarios para reconstruir [commitId] (commit + snapshot + plano base). */
+    fun objectsOf(commitId: String): List<String> {
+        val c = commit(commitId)
+        return listOf(c.id, c.snapshotHash, snapshot(c).baseFileHash)
+    }
+
     /** Verificación de integridad completa (fsck). Devuelve hashes corruptos/faltantes. */
     fun fsck(): List<String> {
         val bad = ArrayList<String>()

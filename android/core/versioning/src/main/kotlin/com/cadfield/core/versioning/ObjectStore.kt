@@ -23,6 +23,7 @@ interface ObjectStore {
     fun open(hash: String): InputStream
     fun exists(hash: String): Boolean
     fun verify(hash: String): Boolean
+    fun size(hash: String): Long
 }
 
 class FileObjectStore(private val root: File) : ObjectStore {
@@ -72,6 +73,7 @@ class FileObjectStore(private val root: File) : ObjectStore {
 
     override fun open(hash: String): InputStream = pathOf(hash).inputStream()
     override fun exists(hash: String) = pathOf(hash).exists()
+    override fun size(hash: String) = pathOf(hash).length()
     override fun verify(hash: String) = exists(hash) && runCatching { get(hash) }.isSuccess
 
     /** Lista todos los objetos (para auditoría/backup/fsck). */

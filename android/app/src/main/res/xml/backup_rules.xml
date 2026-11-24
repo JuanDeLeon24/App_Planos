@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Respaldo Android (Auto Backup) del índice y del repositorio de versiones; la caché se excluye. -->
+<full-backup-content>
+    <include domain="database" path="." />
+    <include domain="file" path="docs/" />
+    <exclude domain="file" path="docs/tmp/" />
+</full-backup-content>
