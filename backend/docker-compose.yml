@@ -1,0 +1,27 @@
+# Entorno local de desarrollo. Las contraseñas se leen de .env (no versionado).
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: cadfield
+      POSTGRES_USER: cadfield
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD en .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  api:
+    build: ./CadField.Api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: Host=postgres;Database=cadfield;Username=cadfield;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__Redis: redis:6379
+      Auth__DevSigningKey: ${DEV_JWT_KEY:?defina DEV_JWT_KEY (>=32 caracteres) en .env}
+      Storage__Root: /data/objects
+    volumes: [objects:/data/objects]
+    ports: ["5080:8080"]
+    depends_on: [postgres, redis]
+volumes:
+  pgdata:
+  objects:

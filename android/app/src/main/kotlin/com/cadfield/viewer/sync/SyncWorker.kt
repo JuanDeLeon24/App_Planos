@@ -35,6 +35,10 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         val queue = c.db.syncQueue()
         for (item in queue.peek(50)) {
             try {
+                val doc = c.db.documents().get(item.documentId) ?: run { queue.done(item.id); continue }
+                val project = c.db.projects().get(doc.projectId)
+                client.upsertProject(doc.projectId, ProjectUpsert(project?.name ?: "Proyecto"))
+                client.upsertDocument(doc.id, DocumentUpsert(doc.projectId, doc.displayName, doc.originalHash, doc.discipline, doc.front, doc.tunnel))
                 if (item.kind == "COMMIT") pushCommit(c.documents.repo(item.documentId), item.documentId, item.ref, client, c.currentUser)
                 queue.done(item.id)
                 c.db.documents().get(item.documentId)?.let { c.db.documents().update(it.copy(syncState = SyncState.SYNCED)) }

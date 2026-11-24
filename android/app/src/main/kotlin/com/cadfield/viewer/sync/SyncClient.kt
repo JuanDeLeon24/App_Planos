@@ -12,6 +12,11 @@ import java.net.URL
 @Serializable data class NegotiateResponse(val missing: List<String>)
 @Serializable data class RefUpdate(val branch: String, val expectedOld: String?, val new: String)
 @Serializable data class RefState(val branch: String, val commitId: String)
+@Serializable data class ProjectUpsert(val name: String)
+@Serializable data class DocumentUpsert(
+    val projectId: String, val displayName: String, val originalHash: String,
+    val discipline: String?, val front: String?, val tunnel: String?,
+)
 
 class ConflictException(val remoteHead: String) : IOException("La rama remota avanzó: $remoteHead")
 class AuthException : IOException("Sesión expirada: se requiere iniciar sesión")
@@ -22,6 +27,10 @@ class AuthException : IOException("Sesión expirada: se requiere iniciar sesión
  */
 class SyncClient(private val baseUrl: String, private val token: () -> String?) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    fun upsertProject(id: String, body: ProjectUpsert) { request("PUT", "api/v1/projects/$id", json.encodeToString(body)) }
+
+    fun upsertDocument(id: String, body: DocumentUpsert) { request("PUT", "api/v1/documents/$id", json.encodeToString(body)) }
 
     fun negotiate(docId: String, hashes: List<String>): List<String> =
         json.decodeFromString<NegotiateResponse>(
