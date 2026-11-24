@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   core:
@@ -41,3 +42,30 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: '9.0.x' }
       - run: dotnet build backend/CadField.Api/CadField.Api.csproj -c Release
+
+  release-apk:
+    name: Publicar APK para pruebas
+    runs-on: ubuntu-latest
+    needs: android
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: app-debug-apk, path: apk }
+      - name: Renombrar APK
+        run: mv apk/*.apk "apk/CADFieldViewerPro-build${{ github.run_number }}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: "APK de prueba · build ${{ github.run_number }}"
+          prerelease: true
+          files: apk/*.apk
+          body: |
+            APK de depuración para pruebas (no publicar en Play Store).
+            Rama: ${{ github.ref_name }} · commit ${{ github.sha }}
+
+            **Instalar:** abra este enlace desde el teléfono Android (8.0+), descargue el `.apk`,
+            permita "Instalar apps desconocidas" para el navegador o gestor de archivos y ábralo.
+            Se instala como "CAD Field Viewer Pro" (paquete `com.cadfield.viewer.debug`).
