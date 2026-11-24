@@ -86,6 +86,9 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun syncNow() = SyncScheduler.syncNow(getApplication())
+
+    val update = MutableStateFlow<com.cadfield.viewer.update.AvailableUpdate?>(null)
+    init { viewModelScope.launch { update.value = com.cadfield.viewer.update.UpdateChecker.check() } }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -98,6 +101,8 @@ fun ExplorerScreen(onOpen: (String) -> Unit, vm: ExplorerViewModel = viewModel()
     val selection by vm.selection.collectAsStateWithLifecycle()
     val pending by vm.pendingSync.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var newProject by remember { mutableStateOf(false) }
     var importUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var rename by remember { mutableStateOf(false) }
@@ -127,6 +132,20 @@ fun ExplorerScreen(onOpen: (String) -> Unit, vm: ExplorerViewModel = viewModel()
         },
     ) { pad ->
         Column(Modifier.padding(pad)) {
+            update?.let { u ->
+                Card(Modifier.fillMaxWidth().padding(8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Icon(Icons.Default.SystemUpdate, null)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text("Nueva versión disponible (build ${u.build})", style = MaterialTheme.typography.titleSmall)
+                            Text("Se instala encima, sin perder sus planos", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Button(onClick = {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u.apkUrl)))
+                        }) { Text("Actualizar") }
+                    }
+                }
+            }
             busy?.let { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(it, Modifier.padding(8.dp)) }
             OutlinedTextField(filters.query, { vm.filters.value = filters.copy(query = it) }, Modifier.fillMaxWidth().padding(8.dp),
                 placeholder = { Text("Buscar plano, túnel…") }, leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true)

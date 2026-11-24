@@ -14,8 +14,10 @@ android {
         applicationId = "com.cadfield.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-mvp"
+        // Número de build de GitHub Actions → cada APK nuevo es una actualización
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "0.1.$build"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"https://api.cadfield.example/\"")
         // Motor DWG nativo (LibreDWG): sólo ARM 64 bits (prácticamente todos los teléfonos desde 2017)
@@ -26,6 +28,17 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    signingConfigs {
+        // Clave de PRUEBAS fija (no secreta) para que cada APK de CI actualice al anterior
+        // sin desinstalar. Nunca usarla para Play Store: la release se firma con Play App Signing.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
