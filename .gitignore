@@ -1,0 +1,21 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+*.apk
+*.aab
+*.keystore
+*.jks
+# .NET
+bin/
+obj/
+*.user
+appsettings.*.local.json
+# Secretos
+.env
+*.pem
+google-services.json
