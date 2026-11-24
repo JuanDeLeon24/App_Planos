@@ -15,7 +15,7 @@ data class AvailableUpdate(val build: Int, val title: String, val apkUrl: String
 
 /** Busca en GitHub Releases un APK de prueba más nuevo que el instalado (tags apk-build-N). */
 object UpdateChecker {
-    private const val RELEASES = "https://api.github.com/repos/JuanDeLeon24/App_Planos/releases?per_page=10"
+    private const val RELEASES = "https://api.github.com/repos/JuanDeLeon24/App_Planos/releases?per_page=100"
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun check(): AvailableUpdate? = withContext(Dispatchers.IO) {
