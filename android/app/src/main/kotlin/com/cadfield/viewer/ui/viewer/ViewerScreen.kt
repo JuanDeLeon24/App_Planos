@@ -126,7 +126,7 @@ fun ViewerScreen(docId: String, onBack: () -> Unit, onHistory: () -> Unit, vm: V
                     Spacer(Modifier.height(8.dp))
                     Text(st.loadingStage ?: "Cargando plano… ${((st.loadingProgress ?: 0f) * 100).toInt()} %", color = Color.White)
                 }
-                view != null -> CadCanvas(st, view!!, { view = it }, rotation, vm::onTap, Modifier.fillMaxSize())
+                view != null -> CadCanvas(st, view!!, { step -> view = view?.let { step.concat(it) } }, rotation, vm::onTap, Modifier.fillMaxSize())
             }
             // Botón "ajustar a extensión"
             if (render != null) SmallFloatingActionButton(

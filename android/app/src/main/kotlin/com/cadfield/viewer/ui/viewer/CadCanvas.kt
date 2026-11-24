@@ -6,7 +6,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -31,7 +33,8 @@ import com.cadfield.viewer.data.payloadObj
 fun CadCanvas(
     state: ViewerState,
     view: Affine2D,
-    onViewChange: (Affine2D) -> Unit,
+    /** Recibe el paso del gesto (pantalla→pantalla); quien posee la vista lo compone con la vista vigente. */
+    onViewStep: (Affine2D) -> Unit,
     rotationEnabled: Boolean,
     onTapWorld: (Vec2, Double) -> Unit,
     modifier: Modifier = Modifier,
@@ -44,6 +47,11 @@ fun CadCanvas(
     val matrix = remember { Matrix() }
     val values = remember { FloatArray(9) }
     val buffer = remember { ArrayList<RenderItem>(4096) }
+    // Los detectores de gestos viven más que una recomposición: deben leer SIEMPRE la vista
+    // actual (no la capturada al crearse), o cada movimiento se aplicaría a la vista inicial.
+    val currentView by rememberUpdatedState(view)
+    val currentOnViewStep by rememberUpdatedState(onViewStep)
+    val currentOnTap by rememberUpdatedState(onTapWorld)
 
     Canvas(
         modifier
@@ -54,19 +62,20 @@ fun CadCanvas(
                         .concat(Affine2D.rotate(if (rotationEnabled) Math.toRadians(rotation.toDouble()) else 0.0))
                         .concat(Affine2D.scale(zoom.toDouble()))
                         .concat(Affine2D.translate(-c.x, -c.y))
-                    onViewChange(step.concat(view))
+                    currentOnViewStep(step)
                 }
             }
-            .pointerInput(view) {
+            .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { o: Offset ->
-                        val w = view.inverse().apply(Vec2(o.x.toDouble(), o.y.toDouble()))
-                        onTapWorld(w, 28.0 / view.scale) // 28 px de radio de captura
+                        val v = currentView
+                        val w = v.inverse().apply(Vec2(o.x.toDouble(), o.y.toDouble()))
+                        currentOnTap(w, 28.0 / v.scale) // 28 px de radio de captura
                     },
                     onDoubleTap = { o -> // zoom x2 centrado en el toque
                         val step = Affine2D.translate(o.x.toDouble(), o.y.toDouble()).concat(Affine2D.scale(2.0))
                             .concat(Affine2D.translate(-o.x.toDouble(), -o.y.toDouble()))
-                        onViewChange(step.concat(view))
+                        currentOnViewStep(step)
                     },
                 )
             }
