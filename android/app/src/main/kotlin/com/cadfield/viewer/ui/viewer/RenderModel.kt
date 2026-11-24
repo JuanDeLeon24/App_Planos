@@ -88,6 +88,7 @@ class RenderModel(val doc: CadDocument) {
         is CadEntity.Insert -> listOf(e.insert)
         is CadEntity.Face3D -> e.corners
         is CadEntity.Text -> listOf(e.insert)
+        is CadEntity.Hatch -> e.boundaries.flatten().map { Vec3(it.x, it.y) }
         is CadEntity.Unknown -> emptyList()
     }
 }

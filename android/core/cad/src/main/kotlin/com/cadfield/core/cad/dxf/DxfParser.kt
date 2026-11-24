@@ -76,17 +76,49 @@ class DxfParser(
 
     // ---------- Lectura de grupos ----------
 
+    private var pushback: String? = null
+    private var groupCount = 0L
+    /** Líneas no interpretables descartadas al re-sincronizar (diagnóstico). */
+    var skippedLines = 0L
+        private set
+
+    private fun line(): String? {
+        pushback?.let { pushback = null; return it }
+        return reader.readLine()?.also { lineNo++ }
+    }
+
+    private fun isCode(l: String): Boolean = l.trim().toIntOrNull()?.let { it in -5..1071 } == true
+
+    /**
+     * Lee un par (código, valor) de forma tolerante:
+     *  - Valores con saltos de línea crudos (textos multilínea mal exportados por algunos
+     *    programas/convertidores, o '\r' sueltos) se re-unen con "\n".
+     *  - Si aparece una línea que no es código válido, se re-sincroniza saltándola en lugar
+     *    de abortar la lectura de todo el plano.
+     */
     private fun next(): Group? {
         peeked?.let { peeked = null; return it }
-        val codeLine = reader.readLine() ?: return null
-        val value = reader.readLine() ?: throw DxfParseException("Archivo truncado: falta valor de grupo", lineNo)
-        lineNo += 2
-        val code = codeLine.trim().toIntOrNull() ?: throw DxfParseException("Código de grupo inválido '$codeLine'", lineNo - 1)
-        if (lineNo % 4096 == 0L) {
+        var codeLine = line() ?: return null
+        while (!isCode(codeLine)) {
+            skippedLines++
+            codeLine = line() ?: return null
+        }
+        val code = codeLine.trim().toInt()
+        val sb = StringBuilder(line() ?: throw DxfParseException("Archivo truncado: falta valor de grupo", lineNo))
+        // Continuación: si la siguiente línea no es un código válido, pertenece a este valor
+        // (sólo en valores de texto; los numéricos nunca contienen saltos de línea).
+        if (code in 1..4 || code in 1000..1009 || code == 7) {
+            while (true) {
+                val la = line() ?: break
+                if (isCode(la)) { pushback = la; break }
+                sb.append('\n').append(la)
+            }
+        }
+        if (++groupCount % 4096 == 0L) {
             if (isCancelled()) throw cancelled()
             reportProgress()
         }
-        return Group(code, value)
+        return Group(code, sb.toString())
     }
 
     private fun cancelled() = java.util.concurrent.CancellationException("Lectura DXF cancelada")
@@ -224,6 +256,8 @@ class DxfParser(
                 body.firstOrNull { it.code == 40 }?.d() ?: 1.0, dbl(body, 41),
                 body.firstOrNull { it.code == 42 }?.d() ?: (2 * Math.PI))
             "SPLINE" -> parseSpline(handle, layer, color, body)
+            "HATCH" -> runCatching { parseHatch(handle, layer, color, body) }.getOrElse { CadEntity.Unknown(handle, layer, color, type) }
+            "LEADER" -> CadEntity.Polyline(handle, layer, color, pointList(body, 10))
             // La geometría de una cota vive en su bloque anónimo (*Dnn), ya en coordenadas de mundo
             "DIMENSION" -> str(body, 2).takeIf { it.isNotBlank() }
                 ?.let { CadEntity.Insert(handle, layer, color, it.trim(), com.cadfield.core.cad.geom.Vec3(0.0, 0.0, 0.0)) }
@@ -284,6 +318,89 @@ class DxfParser(
             return out
         }
         return CadEntity.Spline(h, l, c, body.firstOrNull { it.code == 71 }?.i() ?: 3, knots, pts(10), weights, pts(11))
+    }
+
+    /** Lista de puntos repetidos (código base 10/20/30). */
+    private fun pointList(body: List<Group>, base: Int): List<com.cadfield.core.cad.geom.Vec3> {
+        val out = ArrayList<com.cadfield.core.cad.geom.Vec3>()
+        var x = 0.0; var y = 0.0; var has = false
+        for (g in body) when (g.code) {
+            base -> { if (has) out += com.cadfield.core.cad.geom.Vec3(x, y, 0.0); x = g.d(); y = 0.0; has = true }
+            base + 10 -> y = g.d()
+            base + 20 -> { out += com.cadfield.core.cad.geom.Vec3(x, y, g.d()); has = false }
+        }
+        if (has) out += com.cadfield.core.cad.geom.Vec3(x, y, 0.0)
+        return out
+    }
+
+    /**
+     * HATCH: contornos de trayectorias tipo polilínea (con bulges) y de aristas
+     * (línea, arco, elipse, spline). Se lee secuencialmente según los contadores DXF.
+     */
+    private fun parseHatch(h: String, l: String, c: CadColor, body: List<Group>): CadEntity {
+        var i = body.indexOfFirst { it.code == 91 }
+        val pattern = body.firstOrNull { it.code == 2 }?.value?.trim() ?: ""
+        val solid = (body.firstOrNull { it.code == 70 }?.i() ?: 0) == 1
+        if (i < 0) return CadEntity.Hatch(h, l, c, emptyList(), solid, pattern)
+        val nPaths = body[i++].i()
+        fun at(code: Int): Group { while (i < body.size && body[i].code != code) i++; return body.getOrNull(i++) ?: Group(code, "0") }
+        val tol = 1e-3
+        val paths = ArrayList<List<com.cadfield.core.cad.geom.Vec2>>()
+        repeat(nPaths) {
+            val flags = at(92).i()
+            val pts = ArrayList<com.cadfield.core.cad.geom.Vec2>()
+            if (flags and 2 != 0) {
+                val hasBulge = at(72).i() != 0
+                at(73)
+                val n = at(93).i()
+                val vs = ArrayList<com.cadfield.core.cad.geom.Vec2>(); val bs = ArrayList<Double>()
+                repeat(n) {
+                    val x = at(10).d(); val y = at(20).d()
+                    vs += com.cadfield.core.cad.geom.Vec2(x, y)
+                    bs += if (hasBulge && body.getOrNull(i)?.code == 42) body[i++].d() else 0.0
+                }
+                for (k in vs.indices) {
+                    val seg = com.cadfield.core.cad.geom.Tessellation.bulgeSegment(vs[k], vs[(k + 1) % vs.size], bs[k], tol * 10)
+                    if (pts.isEmpty()) pts.addAll(seg) else pts.addAll(seg.drop(1))
+                }
+            } else {
+                val nEdges = at(93).i()
+                repeat(nEdges) {
+                    when (at(72).i()) {
+                        1 -> { val a = com.cadfield.core.cad.geom.Vec2(at(10).d(), at(20).d()); val b = com.cadfield.core.cad.geom.Vec2(at(11).d(), at(21).d()); pts += a; pts += b }
+                        2 -> {
+                            val cx = at(10).d(); val cy = at(20).d(); val r = at(40).d(); val s0 = at(50).d(); val e0 = at(51).d(); val ccw = at(73).i() != 0
+                            val (s1, e1) = if (ccw) s0 to e0 else (360 - e0) to (360 - s0)
+                            val arc = com.cadfield.core.cad.geom.Tessellation.arc(com.cadfield.core.cad.geom.Vec2(cx, cy), r, Math.toRadians(s1), Math.toRadians(e1), maxOf(r * 1e-3, 1e-9))
+                            pts.addAll(if (ccw) arc else arc.reversed())
+                        }
+                        3 -> {
+                            val cx = at(10).d(); val cy = at(20).d(); val mx = at(11).d(); val my = at(21).d()
+                            val ratio = at(40).d(); val s0 = Math.toRadians(at(50).d()); val e0 = Math.toRadians(at(51).d()); val ccw = at(73).i() != 0
+                            val el = CadEntity.Ellipse(h, l, c, com.cadfield.core.cad.geom.Vec3(cx, cy), com.cadfield.core.cad.geom.Vec3(mx, my), ratio,
+                                if (ccw) s0 else -e0, if (ccw) e0 else -s0)
+                            val e = el.toPolylines(maxOf(kotlin.math.hypot(mx, my) * 1e-3, 1e-9)).first()
+                            pts.addAll(if (ccw) e else e.reversed())
+                        }
+                        4 -> {
+                            val degree = at(94).i(); at(73); at(74)
+                            val nk = at(95).i(); val nc = at(96).i()
+                            val knots = List(nk) { at(40).d() }
+                            val ctrl = ArrayList<com.cadfield.core.cad.geom.Vec3>()
+                            val w = ArrayList<Double>()
+                            repeat(nc) {
+                                ctrl += com.cadfield.core.cad.geom.Vec3(at(10).d(), at(20).d())
+                                if (body.getOrNull(i)?.code == 42) w += body[i++].d()
+                            }
+                            pts.addAll(CadEntity.Spline(h, l, c, degree, knots, ctrl, w).toPolylines(0.0).firstOrNull().orEmpty())
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+            if (pts.size >= 2) paths += pts
+        }
+        return CadEntity.Hatch(h, l, c, paths, solid, pattern)
     }
 
     /** Consume VERTEX/ATTRIB ... SEQEND de una entidad descartada. */

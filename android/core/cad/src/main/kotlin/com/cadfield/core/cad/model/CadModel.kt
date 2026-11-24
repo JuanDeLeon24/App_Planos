@@ -180,6 +180,15 @@ sealed class CadEntity {
         }
     }
 
+    /** Sombreado (HATCH): se representa por sus contornos; [solid] indica relleno sólido. */
+    data class Hatch(
+        override val handle: String, override val layer: String, override val color: CadColor,
+        val boundaries: List<List<Vec2>>, val solid: Boolean, val pattern: String,
+    ) : CadEntity() {
+        override fun bounds() = BBox.of(boundaries.flatten())
+        override fun toPolylines(chordTol: Double) = boundaries.map { if (it.size > 2 && it.first() != it.last()) it + it.first() else it }
+    }
+
     /** Entidad no interpretada: se preserva (nunca se pierde información del original). */
     data class Unknown(
         override val handle: String, override val layer: String, override val color: CadColor,

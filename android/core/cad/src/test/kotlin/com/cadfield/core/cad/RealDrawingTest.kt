@@ -87,4 +87,40 @@ class RealDrawingTest {
         val solid = doc.entities[1] as CadEntity.Face3D
         assertEquals(1.0, Measurements.polygonArea(solid.corners.map { it.xy() }), 1e-12) // orden 1-2-4-3 correcto
     }
+
+    @Test fun `texto con salto de linea crudo y basura no rompe la lectura`() {
+        val d = "0\nSECTION\n2\nENTITIES\n" +
+            "0\nMTEXT\n8\nTXT\n10\n1\n20\n2\n40\n0.5\n" +
+            "1\nLÍNEA A, MEDIANTE EL PROGRAMA DE\\P\nCA, MEDIANTE EL PROGRAMA\rDE OBRA \"VÍAS 2030\"\n" +
+            "0\nLINE\n8\n0\n10\n0\n20\n0\n11\n3\n21\n4\n" +
+            "basura inesperada\n" +
+            "0\nLINE\n8\n0\n10\n0\n20\n0\n11\n6\n21\n8\n" +
+            "0\nENDSEC\n0\nEOF\n"
+        val p = DxfParser()
+        val doc = p.parse(StringReader(d))
+        val t = doc.entities[0] as CadEntity.Text
+        assertTrue(t.value.contains("CA, MEDIANTE") && t.value.contains("VÍAS 2030"), t.value)
+        assertEquals(3, doc.entities.size)
+        assertEquals(10.0, (doc.entities[2] as CadEntity.Line).end.xy().length(), 1e-12)
+        assertEquals(1L, p.skippedLines)
+    }
+
+    @Test fun `hatch con trayectoria polilinea y con aristas`() {
+        val d = dxf(
+            0 to "SECTION", 2 to "ENTITIES",
+            0 to "HATCH", 8 to "RELLENO", 10 to 0, 20 to 0, 30 to 0, 2 to "SOLID", 70 to 1, 71 to 0, 91 to 2,
+            // trayectoria 1: polilínea 4×3
+            92 to 2, 72 to 0, 73 to 1, 93 to 4, 10 to 0, 20 to 0, 10 to 4, 20 to 0, 10 to 4, 20 to 3, 10 to 0, 20 to 3, 97 to 0,
+            // trayectoria 2: aristas (2 líneas + semicírculo)
+            92 to 1, 93 to 2, 72 to 1, 10 to 10, 20 to 0, 11 to 12, 21 to 0,
+            72 to 2, 10 to 11, 20 to 0, 40 to 1, 50 to 0, 51 to 180, 73 to 1, 97 to 0,
+            75 to 0, 76 to 1, 98 to 1, 10 to 1, 20 to 1,
+            0 to "ENDSEC", 0 to "EOF",
+        )
+        val h = DxfParser().parse(StringReader(d)).entities.single() as CadEntity.Hatch
+        assertTrue(h.solid)
+        assertEquals(2, h.boundaries.size)
+        assertEquals(12.0, Measurements.polygonArea(h.boundaries[0]), 1e-9)
+        assertEquals(PI / 2, Measurements.polygonArea(h.boundaries[1]), 5e-3) // semicírculo r=1 cerrado por la línea
+    }
 }
