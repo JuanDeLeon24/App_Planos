@@ -32,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun build(context: Context) = Room.databaseBuilder(context, AppDatabase::class.java, "cadfield.db")
             // WAL: lecturas concurrentes y durabilidad ante cierres inesperados
-            .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             // Nunca usar fallbackToDestructiveMigration: se perderían datos.
             .build()
     }
